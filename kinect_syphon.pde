@@ -13,20 +13,27 @@ SyphonServer server;
 
 // Kinect Library object
 Kinect kinect;
-PVector v_old = new PVector(0, 0);
+PVector v_old_x = new PVector(0, 0);
+PVector v_old_y = new PVector(0, 0);
 
 // Angle for rotation
 float a = 0;
 
-int skipX = 1;
-int skipY = 10;
+int skipX = 2;
+int skipY = 2;
 float zoom_factor = 1000;
-float min_thrsh = 730;
-float max_thrsh = 970; // 970
+float min_thrsh = 42.0;
+float max_thrsh = 636.0; // 970
 float max_dist = 14 * skipX;
 
 // We'll use a lookup table so that we don't have to repeat the math over and over
 float[] depthLookUp = new float[2048];
+int[][] mat;
+int n_rows;
+int n_cols;
+
+boolean limit = true;
+PVector zero = new PVector(0., 0., 0.);
 
 void setup() {
   // Rendering in P3D
@@ -39,6 +46,11 @@ void setup() {
   for (int i = 0; i < depthLookUp.length; i++) {
     depthLookUp[i] = rawDepthToMeters(i);
   }
+  
+  n_rows = kinect.height / skipY;
+  n_cols = kinect.width / skipX;
+  mat = new int[n_cols][n_rows];
+  
   background(0);
   server = new SyphonServer(this, "Processing");
 }
@@ -50,31 +62,57 @@ void draw() {
   int[] depth = kinect.getRawDepth();
   
   // Translate and rotate
-  translate(width/2, height/2, 0);
-  //rotateY(mouseX * 6.28 / width - 3.14);
-  //rotateX(mouseY * 6.28 / height - 3.14);
+  translate(width/2, height/2, -zoom_factor/2.);
+  rotateY(mouseX * 6.28 / width - 3.14);
+  rotateX(mouseY * 6.28 / height - 3.14);
   a += 0.01f;
   
   // Nested for loop that initializes x and y pixels and, for those less than the
   // maximum threshold and at every skiping point, the offset is caculated to map
   // them on a plane instead of just a line
-  for (int y = 0; y < kinect.height; y += skipY) {
-    for (int x = 0; x < kinect.width; x += skipX) {
+  for (int y = 0, j=0; y < kinect.height; y += skipY, j++) {
+    for (int x = 0, i=0; x < kinect.width; x += skipX, i++) {
       int offset = x + y*kinect.width;
       int rawDepth = depth[offset];
-      PVector v = depthToWorld(x, y, rawDepth);
-      v.mult(zoom_factor);
-      if (rawDepth > min_thrsh  && rawDepth < max_thrsh) {        
-        stroke(255);
-        strokeWeight(2);
-
-        if( v.dist(v_old) < max_dist) {
-          pushMatrix();
-          line(v.x, v.y, zoom_factor-v.z, v_old.x, v_old.y, zoom_factor-v_old.z);
-          popMatrix();
-        }
+      
+      mat[i][j] = rawDepth; // v.z;
+    }
+  }
+  
+  for (int j=1; j < n_rows; j++) {
+    for (int i=1; i < n_cols; i++) {
+      int rawDepth = mat[i][j];
+      if (!limit || rawDepth > min_thrsh  && rawDepth < max_thrsh) { 
+        PVector v = depthToWorld(i*skipX, j*skipY, rawDepth);
+        v.mult(zoom_factor);
+        PVector v_old_x = depthToWorld((i-1)*skipX, j*skipY, mat[i-1][j]);
+        v_old_x.mult(zoom_factor);
+        PVector v_old_y = depthToWorld(i*skipX, (j-1)*skipY, mat[i][j-1]);
+        v_old_y.mult(zoom_factor);
+               
+        if(v.dist(zero) < 5. || v_old_x.dist(zero) < 5. || v_old_y.dist(zero) < 5.)
+          continue;
         
-        v_old = v.copy();
+        fill(255);
+        stroke(255);
+        strokeWeight(0.3);
+
+        if(false && i==1 && j==1) {
+          text(" " + v, 10, 10);
+          text(" " + v_old_x, 10, 30);
+          text(" " + v_old_y, 10, 50);
+          //println(" " + v + " " + v_old_x + " " + v_old_y);
+        }
+
+        pushMatrix();
+        
+        if(!limit || v.dist(v_old_x) < max_dist) {
+          line(v.x, v.y, zoom_factor - v.z, v_old_x.x, v_old_x.y, zoom_factor - v_old_x.z);
+        }
+        if(!limit || v.dist(v_old_y) < max_dist) {
+          line(v.x, v.y, zoom_factor - v.z, v_old_y.x, v_old_y.y, zoom_factor - v_old_y.z);
+        }
+        popMatrix();
       }
     }
   }
